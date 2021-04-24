@@ -13,9 +13,11 @@
 <body>
 <canvas id="myCanvas"></canvas>
 <script>
-    let url = prompt("url/ip of server (for example: 127.0.0.1)");
-    let port = prompt("port? (for example: 5500)");
-    const exampleSocket = new WebSocket("wss://"+url+":"+port);
+    let url = prompt("url/ip of server (for example: https://12345.ngrok.io)");
+    if(url.startsWith("http://")) url = url.substring(7);
+    if(url.startsWith("https://")) url = url.substring(8);
+
+    const exampleSocket = new WebSocket("wss://"+url+":443");
     const imageEl = new Image();
     const canvas = document.getElementById("myCanvas");
     const ctx = canvas.getContext("2d");
@@ -37,12 +39,16 @@
         console.log("cheesy");
         if((typeof e.data) === "string"){
             console.log(e.data);
+            if(e.data === "QUIT") {
+                alert("connection closed")
+            }
         } else {
             e.data.arrayBuffer().then(buffer =>{
                 imageEl.src = URL.createObjectURL(
                     new Blob([buffer], { type: 'image/png' })
                 );
             });
+            exampleSocket.send("READY");
         }
     }
 

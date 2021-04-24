@@ -14,10 +14,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
-import java.util.Scanner;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 
 /** Most of the websockets logic is from the following MDN page:
  *  https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_a_WebSocket_server_in_Java
@@ -30,12 +30,8 @@ public class BYOWWebServer {
     private final ServerSocket server;
     private final InputStream in;
     private final OutputStream out;
-
-    public static void main(String[] args) throws IOException {
-        BYOWWebServer server = new BYOWWebServer(5500);
-        server.clientNextKeyTyped();
-        server.sendCanvas();
-    }
+    private Queue<Character> inputs;
+    private boolean readyForFrame; //because ngrok can't keep up sometimes
 
     public BYOWWebServer(int port) throws IOException {
         server = new ServerSocket(port);
@@ -46,71 +42,37 @@ public class BYOWWebServer {
         in = client.getInputStream();
         out = client.getOutputStream();
         doWebsocketHandshake();
+        inputs = new ArrayDeque<>();
+        readyForFrame = true;
     }
 
-    private void doWebsocketHandshake() throws IOException {
-        Scanner s = new Scanner(in, StandardCharsets.UTF_8);
-        MessageDigest sha1 = null;
-        try {
-            sha1 = MessageDigest.getInstance("SHA-1");
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalArgumentException("SHA-1 not supported :(");
-        }
-        String data = s.useDelimiter("\\r\\n\\r\\n").next();
-        Matcher get = Pattern.compile("^GET").matcher(data);
-        Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(data);
-        if (get.find() && match.find()) {
-            String magic = match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-            byte[] response = ("HTTP/1.1 101 Switching Protocols\r\n"
-                    + "Connection: Upgrade\r\n"
-                    + "Upgrade: websocket\r\n"
-                    + "Sec-WebSocket-Accept: "
-                    + Base64.getEncoder().encodeToString(
-                            sha1.digest(magic.getBytes(StandardCharsets.UTF_8)))
-                    + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
-            out.write(response, 0, response.length);
-        } else {
-            throw new IllegalArgumentException("Received message other than websocket handshake");
-        }
-    }
+
 
     public boolean clientHasKeyTyped() {
-        try {
-            return in.available() > 0;
-        } catch (IOException ex) {
-            System.out.println("IO EXCEPTION CAUGHT");
-            stopConnection();
-            return false;
-        }
+        getClientInputs();
+        return inputs.size() > 0;
     }
 
     public char clientNextKeyTyped() {
-        try {
-            String next = readInput(in);
-            if (next.length() != 1) {
-                throw new IllegalArgumentException("Unexpected message from websocket: "+ next);
-            }
-            return next.charAt(0);
-        } catch (IOException ex) {
-            System.out.println("IO EXCEPTION CAUGHT");
-            stopConnection();
-            return 'q';
-        }
+        getClientInputs();
+        return inputs.poll();
     }
 
     public void sendCanvas() {
+        getClientInputs();
+        if (!readyForFrame) {
+            return;
+        }
         try {
             StdDraw.save(CANVAS_FILE);
             byte[] contents = Files.readAllBytes(CANVAS_PATH);
             sendOutput(out, contents, true);
+            readyForFrame = false;
         } catch (IOException ex) {
             System.out.println("IO EXCEPTION CAUGHT");
             stopConnection();
         }
     }
-
-    //TODO: writes and reads that aren't static
-
     public void stopConnection() {
         System.out.println("Stopping connection");
         try {
@@ -123,6 +85,52 @@ public class BYOWWebServer {
         }
     }
 
+    private void getClientInputs() {
+        try {
+            while (in.available() > 0) {
+                String nextInput = readInput(in);
+                if (nextInput.length() == 1) {
+                    inputs.add(nextInput.charAt(0));
+                } else if (nextInput.equals("READY")) {
+                    readyForFrame = true;
+                } else {
+                    throw new IllegalArgumentException("Unexpected message from websocket: "+ nextInput);
+                }
+            }
+        } catch (IOException ex) {
+            System.out.println("IO EXCEPTION CAUGHT");
+            stopConnection();
+        }
+    }
+
+    private void doWebsocketHandshake() throws IOException {
+        Scanner s = new Scanner(in, StandardCharsets.UTF_8);
+        MessageDigest sha1 = null;
+        try {
+            sha1 = MessageDigest.getInstance("SHA-1");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalArgumentException("SHA-1 not supported :(");
+        }
+        String data = s.useDelimiter("\\r\\n\\r\\n").next();
+        Matcher get = Pattern.compile("^GET").matcher(data);
+        Matcher match = Pattern.compile("Sec-Web[Ss]ocket-Key: (.*)").matcher(data);
+        boolean gfind = get.find();
+        boolean mfind = match.find();
+        if (gfind && mfind) {
+            String magic = match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+            byte[] response = ("HTTP/1.1 101 Switching Protocols\r\n"
+                    + "Connection: Upgrade\r\n"
+                    + "Upgrade: websocket\r\n"
+                    + "Sec-WebSocket-Accept: "
+                    + Base64.getEncoder().encodeToString(
+                    sha1.digest(magic.getBytes(StandardCharsets.UTF_8)))
+                    + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+            out.write(response, 0, response.length);
+        } else {
+            throw new IllegalArgumentException("Received message other than websocket handshake ("+gfind+mfind+"):\n"
+                    + data);
+        }
+    }
 
     private static String readInput(InputStream in) throws IOException {
         //https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
