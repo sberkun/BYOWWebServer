@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>I like cheese</title>
+    <style>
+      body,html{
+        height:100%;
+        margin:0;
+        overflow:hidden;
+      }
+    </style>
+</head>
+<body>
+<canvas id="myCanvas"></canvas>
+<script>
+    let url = prompt("url/ip of server (for example: 127.0.0.1)");
+    let port = prompt("port? (for example: 5500)");
+    const exampleSocket = new WebSocket("ws://"+url+":"+port);
+    const imageEl = new Image();
+    const canvas = document.getElementById("myCanvas");
+    const ctx = canvas.getContext("2d");
+    let connected = false;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    exampleSocket.onopen = function(e) {
+        console.log("connected");
+        connected = true;
+    }
+
+    exampleSocket.onerror = function(e) {
+        console.err(e);
+        connected = false;
+    }
+
+    exampleSocket.onmessage = function(e) {
+        console.log("cheesy");
+        if((typeof e.data) === "string"){
+            console.log(e.data);
+        } else {
+            e.data.arrayBuffer().then(buffer =>{
+                imageEl.src = URL.createObjectURL(
+                    new Blob([buffer], { type: 'image/png' })
+                );
+            });
+        }
+    }
+
+    imageEl.onload = function() {
+        URL.revokeObjectURL(this.src);
+        ctx.drawImage(imageEl, 10, 10);
+    }
+
+    document.addEventListener('keypress', (e) => {
+        if(connected) exampleSocket.send(e.key);
+    });
+</script>
+
+
+
+</body>
+</html>
