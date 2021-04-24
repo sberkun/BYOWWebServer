@@ -8,58 +8,162 @@
         margin:0;
         overflow:hidden;
       }
+      #outerbox{
+        position:absolute;
+        left:0;right:0;top:0;bottom:0;
+        text-align:center;
+        font-size:5vh;
+        background-color:rgba(100,100,100,0.5);
+      }
+      .cheesebox{
+        margin-top:15vh;
+        width: fit-content;
+        display: inline-block;
+        padding: 2vh;
+        border: 0.2vh solid black;
+        border-radius: 2vh;
+        background-color:white;
+      }
+      .hidden{
+        display: none;
+      }
+      #inputurl{
+        text-align:center;
+        font-size:2vh;
+        width:100%;
+        border:none;
+        border-bottom: solid grey;
+      }
+      #inputurl:focus-visible {
+        outline:none;
+      }
+      #urlsubmit{
+        font-size:3vh;
+        width:100%;
+        border-radius:0.5vh;
+      }
+      #myCanvas {
+        image-rendering: pixelated; /* chrome, safari */
+        image-rendering: crisp-edges; /* firefox */
+      }
     </style>
 </head>
 <body>
 <canvas id="myCanvas"></canvas>
-<script>
-    let url = prompt("url/ip of server (for example: https://12345.ngrok.io)");
-    if(url.startsWith("http://")) url = url.substring(7);
-    if(url.startsWith("https://")) url = url.substring(8);
+<div id="outerbox">
+    <div id="formbox" class="cheesebox">
+        <form id="urlform" autocomplete="off">
+            <label for="inputurl">Enter server URL:</label><br>
+            <input type="url" name="url" id="inputurl" placeholder="https://abcde1234.ngrok.io"><br>
+            <input type="submit" id="urlsubmit" value="Connect">
+        </form>
+    </div>
+    <div id="statusbox" class="cheesebox hidden">
+        Connecting...
+    </div>
+</div>
 
-    const exampleSocket = new WebSocket("wss://"+url+":443");
+<script>
     const imageEl = new Image();
     const canvas = document.getElementById("myCanvas");
     const ctx = canvas.getContext("2d");
-    let connected = false;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    let connected = false;
+    let exampleSocket = null;
 
-    exampleSocket.onopen = function(e) {
-        console.log("connected");
-        connected = true;
+    if (window.localStorage.getItem("saved_url")) {
+        document.getElementById("urlform").url.value = window.localStorage.getItem("saved_url");
     }
 
-    exampleSocket.onerror = function(e) {
-        console.err(e);
-        connected = false;
+    window.onresize = function() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
     }
 
-    exampleSocket.onmessage = function(e) {
-        console.log("cheesy");
-        if((typeof e.data) === "string"){
-            console.log(e.data);
-            if(e.data === "QUIT") {
-                alert("connection closed")
-            }
-        } else {
-            e.data.arrayBuffer().then(buffer =>{
-                imageEl.src = URL.createObjectURL(
-                    new Blob([buffer], { type: 'image/png' })
-                );
-            });
-            exampleSocket.send("READY");
+    function toggle_hide(id, hide) {
+        if(hide) document.getElementById(id).classList.add("hidden");
+        else     document.getElementById(id).classList.remove("hidden");
+    }
+
+    document.getElementById("urlform").onsubmit = function(e) {
+        e.preventDefault();
+        toggle_hide("formbox",true);
+        toggle_hide("statusbox",false);
+        let url = this.url.value;
+        window.localStorage.setItem("saved_url",url);
+        if(url.startsWith("http://")) url = url.substring(7);
+        if(url.startsWith("https://")) url = url.substring(8);
+        exampleSocket = new WebSocket("wss://"+url+":443");
+        setupSocketListeners();
+
+    }
+
+    function setupSocketListeners() {
+        exampleSocket.onopen = function(e) {
+            console.log("connected");
+            connected = true;
         }
+
+        exampleSocket.onerror = function(e) {
+            console.log(e);
+            connected = false;
+            toggle_hide("outerbox", false);
+            toggle_hide("statusbox", false);
+            document.getElementById("statusbox").innerHTML = "Encountered an error :(<br><a href='.'>click to refresh</a>";
+        }
+
+        exampleSocket.onclose = function() {
+            console.log("disconnected");
+            connected = false;
+            toggle_hide("outerbox", false);
+            toggle_hide("statusbox", false);
+            document.getElementById("statusbox").innerHTML = "Connection closed<br><a href='.'>click to refresh</a>";
+        }
+
+        exampleSocket.onopen = function(e) {
+            console.log("connected");
+            connected = true;
+            toggle_hide("outerbox",true);
+        }
+
+        exampleSocket.onmessage = function(e) {
+            console.log("cheesy");
+            if((typeof e.data) === "string"){
+                console.log(e.data);
+                if(e.data === "QUIT") {
+                    alert("connection closed")
+                }
+            } else {
+                e.data.arrayBuffer().then(buffer =>{
+                    imageEl.src = URL.createObjectURL(
+                        new Blob([buffer], { type: 'image/png' })
+                    );
+                });
+                exampleSocket.send("READY");
+            }
+        }
+
+        document.addEventListener('keypress', (e) => {
+            if(connected) exampleSocket.send(e.key);
+        });
+
     }
 
     imageEl.onload = function() {
         URL.revokeObjectURL(this.src);
-        ctx.drawImage(imageEl, 10, 10);
+        let scale = Math.min(canvas.width/imageEl.width, canvas.height/imageEl.height);
+        if (scale > 1) scale = Math.floor(scale*2)/2; //nearest 1.5
+        ctx.drawImage(
+            imageEl,
+            Math.floor((canvas.width - imageEl.width*scale)/2),
+            Math.floor((canvas.height - imageEl.height*scale)/2),
+            imageEl.width*scale,
+            imageEl.height*scale
+        );
     }
 
-    document.addEventListener('keypress', (e) => {
-        if(connected) exampleSocket.send(e.key);
-    });
+
 </script>
 
 
