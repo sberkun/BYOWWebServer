@@ -131,12 +131,8 @@
             if((typeof e.data) === "string"){
                 console.log(e.data);
             } else {
-                e.data.arrayBuffer().then(buffer =>{
-                    imageEl.src = URL.createObjectURL(
-                        new Blob([buffer], { type: 'image/png' })
-                    );
-                });
                 exampleSocket.send("READY");
+                imageEl.src = URL.createObjectURL(e.data);
             }
         }
 
