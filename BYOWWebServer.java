@@ -2,13 +2,13 @@ package byow.Networking;
 
 import edu.princeton.cs.introcs.StdDraw;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
@@ -29,10 +29,7 @@ https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_a_WebSoc
 
 public class BYOWWebServer {
     private static final String CANVAS_FILE = ".server_canvas.png";
-    private static final String DIFF_FILE = ".server_canvas_diff.png";
-    private static final String CWD = System.getProperty("user.dir");
-    private static final Path CANVAS_PATH = Paths.get(CWD, CANVAS_FILE);
-    private static final Path DIFF_PATH = Paths.get(CWD, DIFF_FILE);
+    private static final Path CANVAS_PATH = Paths.get(System.getProperty("user.dir"), CANVAS_FILE);
     private int port;
     private ServerSocket server;
     private InputStream in;
@@ -96,12 +93,10 @@ public class BYOWWebServer {
             return;
         }
         try {
+
             cacheImageDifference(queuedFrame);
-            ImageIO.write(cachedFrame, "png", DIFF_PATH.toFile());
+            byte[] contents = bufferedImageToPngBytes(cachedFrame);
             cachedFrame = queuedFrame;
-            Path toSend = CANVAS_PATH.toFile().length() < DIFF_PATH.toFile().length()
-                    ? CANVAS_PATH : DIFF_PATH;
-            byte[] contents = Files.readAllBytes(toSend);
             sendOutput(contents, true);
             readyForFrame = false;
             queuedFrame = null;
@@ -128,6 +123,12 @@ public class BYOWWebServer {
         }
         cachedFrame.setRGB(0, 0, W, H, diffColors, 0, W);
         cachedColors = newColors;
+    }
+
+    private byte[] bufferedImageToPngBytes(BufferedImage img) throws IOException {
+        ByteArrayOutputStream outStream = new ByteArrayOutputStream();
+        ImageIO.write(img, "png", outStream);
+        return outStream.toByteArray();
     }
 
     private void getClientInputs() {

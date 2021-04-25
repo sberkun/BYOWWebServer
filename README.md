@@ -18,5 +18,5 @@ In ad-hoc testing, latency was found to average around 300ms. This is bad, but b
  - 80 ms to send a keypress to server (ngrok is probably making this bad)
  - 30 ms for the game to calculate and render the next frame
  - 30 ms for StdDraw to save the frame to a png file
- - 70 ms to calculate the difference from the last frame, save that to a png, and read it back as bytes
+ - 70 ms to calculate the difference from the last frame and convert it to png format
  - 90 ms to send the resulting frame back to the client. This is upped to 300-400ms if it's a full image (around 100kb) rather than a difference of frames.
