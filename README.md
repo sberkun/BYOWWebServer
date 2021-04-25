@@ -1,9 +1,6 @@
 # BYOWWebServer
 
-I couldn't figure out how to make a web client for BYOWServer, so I made this instead.
-
-Performance is quite bad, but its marginally playable.
-
+A simple server and web client for BYOW. Performance exceeds the performance of BYOWServer.java for large worlds and/or low bandwidth.
 
 ## Usage
 

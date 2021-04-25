@@ -128,12 +128,8 @@
         }
 
         exampleSocket.onmessage = function(e) {
-            console.log("cheesy");
             if((typeof e.data) === "string"){
                 console.log(e.data);
-                if(e.data === "QUIT") {
-                    alert("connection closed")
-                }
             } else {
                 e.data.arrayBuffer().then(buffer =>{
                     imageEl.src = URL.createObjectURL(

@@ -19,7 +19,8 @@ import java.util.Queue;
 import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 
 /*
 Most of the websockets logic is from the following MDN page:
@@ -28,14 +29,24 @@ https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_a_WebSoc
 
 public class BYOWWebServer {
     private static final String CANVAS_FILE = ".server_canvas.png";
-    private static final Path CANVAS_PATH =
-            Paths.get(System.getProperty("user.dir"), CANVAS_FILE);
+    private static final String DIFF_FILE = ".server_canvas_diff.png";
+    private static final String CWD = System.getProperty("user.dir");
+    private static final Path CANVAS_PATH = Paths.get(CWD, CANVAS_FILE);
+    private static final Path DIFF_PATH = Paths.get(CWD, DIFF_FILE);
     private int port;
     private ServerSocket server;
     private InputStream in;
     private OutputStream out;
     private Queue<Character> inputs;
-    private boolean readyForFrame; //because ngrok can't keep up sometimes
+    /** We don't send the next frame over until the client has confirmed
+     *  that they received the last one. This is because we rely on image differences,
+     *  so client missing frame potentially puts everything out of wack. */
+    private boolean readyForFrame;
+    private BufferedImage queuedFrame;
+    /** We only send over the differences of frames. cachedFrame is the last frame
+     *  sent, and cachedColors is its color array. */
+    private BufferedImage cachedFrame;
+    private int[] cachedColors;
 
     public BYOWWebServer(int port) throws IOException {
         setupServer(port);
@@ -43,29 +54,32 @@ public class BYOWWebServer {
 
     public boolean clientHasKeyTyped() {
         getClientInputs();
+        sendQueuedFrame();
         return inputs.size() > 0;
     }
 
     public char clientNextKeyTyped() {
         getClientInputs();
+        sendQueuedFrame();
         return inputs.poll();
+    }
+
+    public void sendCanvasConfig(int width, int height) {
+        //does nothing, only here because BYOWServer has it and I want compatibility
     }
 
     public void sendCanvas() {
         getClientInputs();
-        if (!readyForFrame) {
-            return;
-        }
         try {
             StdDraw.save(CANVAS_FILE);
-            byte[] contents = Files.readAllBytes(CANVAS_PATH);
-            sendOutput(contents, true);
-            readyForFrame = false;
+            queuedFrame = ImageIO.read(CANVAS_PATH.toFile());
+            sendQueuedFrame();
         } catch (IOException ex) {
             System.out.println("IO EXCEPTION CAUGHT: " + ex.getMessage());
             restartServer();
         }
     }
+
     public void stopConnection() {
         System.out.println("Stopping connection");
         try {
@@ -75,6 +89,45 @@ public class BYOWWebServer {
         } catch (IOException ex) {
             System.out.println("IO EXCEPTION CAUGHT WHEN STOPPING: " + ex.getMessage());
         }
+    }
+
+    private void sendQueuedFrame() {
+        if (!readyForFrame || queuedFrame == null) {
+            return;
+        }
+        try {
+            cacheImageDifference(queuedFrame);
+            ImageIO.write(cachedFrame, "png", DIFF_PATH.toFile());
+            cachedFrame = queuedFrame;
+            Path toSend = CANVAS_PATH.toFile().length() < DIFF_PATH.toFile().length()
+                    ? CANVAS_PATH : DIFF_PATH;
+            byte[] contents = Files.readAllBytes(toSend);
+            sendOutput(contents, true);
+            readyForFrame = false;
+            queuedFrame = null;
+        } catch (IOException ex) {
+            System.out.println("IO EXCEPTION CAUGHT: " + ex.getMessage());
+            restartServer();
+        }
+    }
+
+    private void cacheImageDifference(BufferedImage newFrame) {
+        int W = newFrame.getWidth();
+        int H = newFrame.getHeight();
+        if (cachedFrame == null || cachedFrame.getWidth() != W || cachedFrame.getHeight() != H) {
+            cachedFrame = newFrame;
+            cachedColors = newFrame.getRGB(0, 0, W, H, null, 0, W);
+            return;
+        }
+        int[] diffColors = new int[W * H];
+        int[] newColors = newFrame.getRGB(0, 0, W, H, null, 0, W);
+        for (int a = 0; a < W * H; a++) {
+            if (newColors[a] != cachedColors[a]) {
+                diffColors[a] = newColors[a]; //else 0, which is transparent
+            }
+        }
+        cachedFrame.setRGB(0, 0, W, H, diffColors, 0, W);
+        cachedColors = newColors;
     }
 
     private void getClientInputs() {
@@ -108,6 +161,9 @@ public class BYOWWebServer {
         doWebsocketHandshake();
         inputs = new ArrayDeque<>();
         readyForFrame = true;
+        queuedFrame = null;
+        cachedFrame = null;
+        cachedColors = null;
     }
 
     private void restartServer() {
