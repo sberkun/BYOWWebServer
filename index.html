@@ -76,9 +76,18 @@
         document.getElementById("urlform").url.value = window.localStorage.getItem("saved_url");
     }
 
+    if(window.location.host.indexOf(".ngrok.io") != -1) {
+        toggle_hide("formbox",true);
+        toggle_hide("statusbox",false);
+        exampleSocket = new WebSocket("wss://"+window.location.host+":443");
+        setupSocketListeners();
+    }
+
     window.onresize = function() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        toggle_hide("outerbox", false);
+        toggle_hide("statusbox", false);
+        document.getElementById("statusbox").innerHTML =
+            "Window resized! Please reload the page<br><a href='.'>click to refresh</a>";
     }
 
     function toggle_hide(id, hide) {
@@ -96,13 +105,28 @@
         if(url.startsWith("https://")) url = url.substring(8);
         exampleSocket = new WebSocket("wss://"+url+":443");
         setupSocketListeners();
-
     }
 
     function setupSocketListeners() {
         exampleSocket.onopen = function(e) {
             console.log("connected");
             connected = true;
+            toggle_hide("outerbox",true);
+            ctx.font = "20px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(
+                "Connected! If this message persists, try pressing a key.",
+                canvas.width/2,
+                canvas.height/3);
+        }
+
+        exampleSocket.onmessage = function(e) {
+            if((typeof e.data) === "string"){
+                console.log(e.data);
+            } else {
+                exampleSocket.send("READY");
+                imageEl.src = URL.createObjectURL(e.data);
+            }
         }
 
         exampleSocket.onerror = function(e) {
@@ -121,23 +145,12 @@
             document.getElementById("statusbox").innerHTML = "Connection closed<br><a href='.'>click to refresh</a>";
         }
 
-        exampleSocket.onopen = function(e) {
-            console.log("connected");
-            connected = true;
-            toggle_hide("outerbox",true);
-        }
-
-        exampleSocket.onmessage = function(e) {
-            if((typeof e.data) === "string"){
-                console.log(e.data);
-            } else {
-                exampleSocket.send("READY");
-                imageEl.src = URL.createObjectURL(e.data);
-            }
-        }
-
         document.addEventListener('keypress', (e) => {
-            if(connected) exampleSocket.send(e.key);
+            if(connected && e.key.length === 1) exampleSocket.send(e.key);
+        });
+
+        window.addEventListener('beforeunload', (e) => {
+            if(connected) exampleSocket.send("EXIT");
         });
 
     }

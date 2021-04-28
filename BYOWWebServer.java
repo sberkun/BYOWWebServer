@@ -9,14 +9,18 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.Base64;
 import java.util.Queue;
 import java.util.Scanner;
+import java.util.Date;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.awt.image.BufferedImage;
@@ -29,9 +33,11 @@ https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_a_WebSoc
 
 public class BYOWWebServer {
     private static final String CANVAS_FILE = ".server_canvas.png";
-    private static final Path CANVAS_PATH = Paths.get(System.getProperty("user.dir"), CANVAS_FILE);
-    private int port;
-    private ServerSocket server;
+    private static final String CWD = System.getProperty("user.dir");
+    private static final Path CANVAS_PATH = Paths.get(CWD, CANVAS_FILE);
+    private static final Path HTML_PATH = Paths.get(CWD, "byow", "Networking", "index.html");
+    private final int port;
+    private final ServerSocket server;
     private InputStream in;
     private OutputStream out;
     private Queue<Character> inputs;
@@ -46,23 +52,25 @@ public class BYOWWebServer {
     private int[] cachedColors;
 
     public BYOWWebServer(int port) throws IOException {
-        setupServer(port);
+        this.port = port;
+        server = new ServerSocket(port);
+        System.out.println("Server has started on port " + port);
+        setupServer();
     }
 
     public boolean clientHasKeyTyped() {
         getClientInputs();
         sendQueuedFrame();
-        return inputs.size() > 0;
+        return !inputs.isEmpty();
     }
 
     public char clientNextKeyTyped() {
         getClientInputs();
         sendQueuedFrame();
+        if (inputs.isEmpty()) {
+            throw new IllegalArgumentException("Client does not have next key typed");
+        }
         return inputs.poll();
-    }
-
-    public void sendCanvasConfig(int width, int height) {
-        //does nothing, only here because BYOWServer has it and I want compatibility
     }
 
     public void sendCanvas() {
@@ -93,7 +101,6 @@ public class BYOWWebServer {
             return;
         }
         try {
-
             cacheImageDifference(queuedFrame);
             byte[] contents = bufferedImageToPngBytes(cachedFrame);
             cachedFrame = queuedFrame;
@@ -139,6 +146,9 @@ public class BYOWWebServer {
                     inputs.add(nextInput.charAt(0));
                 } else if (nextInput.equals("READY")) {
                     readyForFrame = true;
+                } else if (nextInput.equals("EXIT")) {
+                    System.out.println("Client unloaded");
+                    restartServer();
                 } else {
                     throw new IllegalArgumentException(
                             "Unexpected message from websocket: " + nextInput);
@@ -150,16 +160,20 @@ public class BYOWWebServer {
         }
     }
 
-    private void setupServer(int p) throws IOException {
-        port = p;
-        server = new ServerSocket(port);
-        System.out.println("Server has started on port " + port
-                + "\r\nWaiting for a connection...");
-        Socket client = server.accept();
-        System.out.println("A client connected.");
-        in = client.getInputStream();
-        out = client.getOutputStream();
-        doWebsocketHandshake();
+    private void setupServer() throws IOException {
+        System.out.println("Waiting for a connection...");
+        while (true) {
+            Socket client = server.accept();
+            System.out.println("A client connected...");
+            in = client.getInputStream();
+            out = client.getOutputStream();
+            if (doWebsocketHandshake()) {
+                break;
+            }
+            in.close();
+            out.close();
+        }
+        System.out.println("Websocket connection established!");
         inputs = new ArrayDeque<>();
         readyForFrame = true;
         queuedFrame = null;
@@ -168,15 +182,16 @@ public class BYOWWebServer {
     }
 
     private void restartServer() {
-        stopConnection();
         try {
-            setupServer(port);
+            in.close();
+            out.close();
+            setupServer();
         } catch (IOException ex) {
             throw new IllegalArgumentException("Could not restart server: " + ex.getMessage());
         }
     }
 
-    private void doWebsocketHandshake() throws IOException {
+    private boolean doWebsocketHandshake() throws IOException {
         Scanner s = new Scanner(in, StandardCharsets.UTF_8);
         MessageDigest sha1;
         try {
@@ -185,22 +200,62 @@ public class BYOWWebServer {
             throw new IllegalArgumentException("SHA-1 not supported :(");
         }
         String data = s.useDelimiter("\\r\\n\\r\\n").next();
-        Matcher get = Pattern.compile("^GET").matcher(data);
+        boolean get = Pattern.compile("^GET").matcher(data).find();
+        Matcher getRoot = Pattern.compile("^GET /(index\\.html)? ").matcher(data);
         Matcher match = Pattern.compile("Sec-Web[Ss]ocket-Key: (.*)").matcher(data);
-        if (get.find() && match.find()) {
+
+        if (get && match.find()) {
             String magic = match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-            byte[] response = ("HTTP/1.1 101 Switching Protocols\r\n"
-                    + "Connection: Upgrade\r\n"
-                    + "Upgrade: websocket\r\n"
-                    + "Sec-WebSocket-Accept: "
-                    + Base64.getEncoder().encodeToString(
-                    sha1.digest(magic.getBytes(StandardCharsets.UTF_8)))
-                    + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+            byte[] response = httpResponse(
+                   "HTTP/1.1 101 Switching Protocols",
+                    "Connection: Upgrade",
+                    "Upgrade: websocket",
+                    "Sec-WebSocket-Accept: " + Base64.getEncoder().encodeToString(
+                            sha1.digest(magic.getBytes(StandardCharsets.UTF_8)))
+            );
             out.write(response, 0, response.length);
+            return true;
+        } else if (get && getRoot.find()) {
+            String message = Files.readString(HTML_PATH);
+            byte[] response = httpResponse(
+                    "HTTP/1.1 200 OK",
+                    "Server: BYOWWebServer",
+                    "Content-Type: text/html",
+                    dateLine(),
+                    "Content-Length: " + message.length(),
+                    "", message, ""
+            );
+            out.write(response, 0, response.length);
+            return false;
         } else {
-            throw new IllegalArgumentException(
-                    "Received message other than websocket handshake:\n" + data);
+            System.out.println("Unknown HTTP message: " + data.substring(0, data.indexOf('\r')));
+            String message = "Not found :(";
+            byte[] response = httpResponse(
+                    "HTTP/1.1 404 Not Found",
+                    "Connection: close",
+                    "Content-Type: text/plain",
+                    dateLine(),
+                    "Content-Length: " + message.length(),
+                    "", message, "" //idk why the extra extra line at the end is necessary
+            );
+            out.write(response, 0, response.length);
+            return false;
         }
+    }
+
+    private static byte[] httpResponse(String... lines) {
+        StringBuilder res = new StringBuilder();
+        for (String line : lines) {
+            res.append(line).append("\r\n");
+        }
+        res.append("\r\n");
+        return res.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String dateLine() {
+        SimpleDateFormat formatter = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z");
+        formatter.setTimeZone(TimeZone.getTimeZone("GMT"));
+        return "Date: " + formatter.format(new Date());
     }
 
     private String readInput() throws IOException {

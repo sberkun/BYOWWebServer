@@ -4,11 +4,9 @@ A simple server and web client for BYOW.
 
 ## Usage
 
-Copy BYOWWebServer.java into the Networking directory, then change Engine.java to use BYOWWebServer instead of BYOWServer.
+Copy both BYOWWebServer.java and index.html into the Networking directory, then change Engine.java to use BYOWWebServer instead of BYOWServer.
 
-Run `ngrok http [port]` instead of `ngrok tcp [port]`. Then run the game, which should start up a webserver that says "waiting for connection".
-
-Then you (or a friend), can go to <https://sberkun.github.io/BYOWWebServer/>, enter the ngrok url, and play the game!
+Run `ngrok http [port]`. Then run the game, which should start up a server that says "waiting for connection". Now you (or a friend), can go to the link provided by ngrok (i.e. https://abcde12345.ngrok.io) and play the game!
 
 ## Performance
 
